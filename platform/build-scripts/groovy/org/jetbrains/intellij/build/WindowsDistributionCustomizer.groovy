@@ -73,6 +73,12 @@ abstract class WindowsDistributionCustomizer {
   List<String> customNsiConfigurationFiles = []
 
   /**
+   * Path to silent.config which contains set of properties to manage UI options to install product in silent mode
+   * Default version (equals null): community/platform/build-scripts/resources/win/nsis/silent.config
+   */
+  String silentInstallationConfig = null
+
+  /**
    * Name of the root directory in Windows .zip archive
    */
   String getRootDirectoryName(ApplicationInfoProperties applicationInfo, String buildNumber) { "" }

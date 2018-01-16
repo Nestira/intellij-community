@@ -1,4 +1,3 @@
-import java.time.LocalDateTime;
 import java.util.*;
 
 public class LongRangeKnownMethods {
@@ -11,10 +10,13 @@ public class LongRangeKnownMethods {
     }
   }
 
-  void testLocalDateTime(LocalDateTime ldt) {
-    if(<warning descr="Condition 'ldt.getHour() == 24' is always 'false'">ldt.getHour() == 24</warning>) System.out.println(1);
-    if(<warning descr="Condition 'ldt.getMinute() >= 0' is always 'true'">ldt.getMinute() >= 0</warning>) System.out.println(2);
-    if(<warning descr="Condition 'ldt.getSecond() >= 60' is always 'false'">ldt.getSecond() >= 60</warning>) System.out.println(3);
+  void testExternalAnnotations(int i, long l) {
+    if(<warning descr="Condition 'Integer.bitCount(i) == -1' is always 'false'">Integer.bitCount(i) == -1</warning>) {
+      System.out.println("Impossible");
+    }
+    if(Long.<error descr="Cannot resolve method 'numberOfLeadingZeroes(long)'">numberOfLeadingZeroes</error>(l) <= 64) {
+      System.out.println("Always");
+    }
   }
 
   private static int twiceIndexOf(String text, int start, int end) {
@@ -196,13 +198,13 @@ public class LongRangeKnownMethods {
 
   void testEmptyListGet(List<String> list) {
     if (list.isEmpty()) {
-      System.out.println(list.<warning descr="The call to 'get' always fails, according to its method contracts">get</warning>(0));
+      System.out.println(list.<warning descr="The call to 'get' always fails as index is out of bounds">get</warning>(0));
     }
   }
 
   void testBoundError(List<String> list) {
     if (list.size() < 10) {
-      System.out.println(list.<warning descr="The call to 'get' always fails, according to its method contracts">get</warning>(10));
+      System.out.println(list.<warning descr="The call to 'get' always fails as index is out of bounds">get</warning>(10));
     }
   }
 

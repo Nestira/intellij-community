@@ -100,7 +100,7 @@ public class CompletionProgressIndicator extends ProgressIndicatorBase implement
   private final CompletionLookupArranger myArranger;
   private OffsetsInFile myHostOffsets;
   private final LookupImpl myLookup;
-  private final Alarm mySuppressTimeoutAlarm = new Alarm();
+  private final Alarm mySuppressTimeoutAlarm = new Alarm(this);
   private final MergingUpdateQueue myQueue;
   private final Update myUpdate = new Update("update") {
     @Override
@@ -188,7 +188,7 @@ public class CompletionProgressIndicator extends ProgressIndicatorBase implement
     myHandler.lookupItemSelected(this, lookupItem, completionChar, myLookup.getItems());
   }
 
-  OffsetMap getOffsetMap() {
+  public OffsetMap getOffsetMap() {
     return myOffsetMap;
   }
 
@@ -231,12 +231,8 @@ public class CompletionProgressIndicator extends ProgressIndicatorBase implement
       }
     }
 
-    for (CompletionContributor contributor : CompletionContributor.forLanguage(initContext.getPositionLanguage())) {
+    for (CompletionContributor contributor : CompletionContributor.forLanguageHonorDumbness(initContext.getPositionLanguage(), initContext.getProject())) {
       ProgressManager.checkCanceled();
-      if (DumbService.getInstance(initContext.getProject()).isDumb() && !DumbService.isDumbAware(contributor)) {
-        continue;
-      }
-
       contributor.duringCompletion(initContext);
     }
     if (document instanceof DocumentWindow) {

@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2016 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2017 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.dvcs.ui;
 
 import com.intellij.icons.AllIcons;
@@ -21,7 +7,6 @@ import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.impl.ActionManagerImpl;
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
-import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopupAdapter;
@@ -42,7 +27,6 @@ import com.intellij.ui.popup.list.ListPopupImpl;
 import com.intellij.ui.popup.list.ListPopupModel;
 import com.intellij.ui.popup.list.PopupListElementRenderer;
 import com.intellij.util.FontUtil;
-import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
@@ -52,12 +36,12 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import javax.swing.plaf.basic.BasicButtonUI;
 import java.awt.*;
-import java.awt.datatransfer.DataFlavor;
 import java.awt.event.*;
 import java.util.List;
 
 import static com.intellij.icons.AllIcons.General.CollapseComponent;
 import static com.intellij.icons.AllIcons.General.CollapseComponentHover;
+import static com.intellij.util.ObjectUtils.assertNotNull;
 import static com.intellij.util.ui.UIUtil.DEFAULT_HGAP;
 import static com.intellij.util.ui.UIUtil.DEFAULT_VGAP;
 
@@ -72,8 +56,10 @@ public class BranchActionGroupPopup extends FlatSpeedSearchPopup {
   private int myMeanRowHeight;
   @Nullable private final String myKey;
   @NotNull private Dimension myPrevSize = JBUI.emptySize();
-  private MyToolbarButton myRestoreSizeButton;
-  private MyToolbarButton mySettingsButton;
+  //these toolbar buttons can be null for child popup components
+  @Nullable private MyToolbarButton myRestoreSizeButton;
+  @Nullable private MyToolbarButton mySettingsButton;
+
   private final List<AnAction> mySettingsActions = ContainerUtil.newArrayList();
 
   public BranchActionGroupPopup(@NotNull String title,
@@ -85,8 +71,6 @@ public class BranchActionGroupPopup extends FlatSpeedSearchPopup {
           preselectActionCondition, true);
     myProject = project;
     DataManager.registerDataProvider(getList(), dataId -> POPUP_MODEL.is(dataId) ? getListModel() : null);
-    installOnHoverIconsSupport(getListElementRenderer());
-    replacePasteAction();
     myKey = dimensionKey;
     if (myKey != null) {
       Dimension storedSize = WindowStateService.getInstance(myProject).getSizeFor(myProject, myKey);
@@ -116,7 +100,7 @@ public class BranchActionGroupPopup extends FlatSpeedSearchPopup {
     mySettingsButton = new MyToolbarButton("Settings", AllIcons.General.Gear, AllIcons.General.GearHover, e -> {
       final ActionPopupMenu popupMenu =
         ((ActionManagerImpl)ActionManager.getInstance()).createActionPopupMenu(BRANCH_POPUP, new DefaultActionGroup(mySettingsActions));
-      popupMenu.getComponent().show(mySettingsButton, 0, mySettingsButton.getHeight());
+      popupMenu.getComponent().show(mySettingsButton, 0, assertNotNull(mySettingsButton).getHeight());
     }) {
       @Override
       protected boolean isButtonEnabled() {
@@ -141,18 +125,6 @@ public class BranchActionGroupPopup extends FlatSpeedSearchPopup {
     // don't store children popup userSize;
     myKey = null;
     DataManager.registerDataProvider(getList(), dataId -> POPUP_MODEL.is(dataId) ? getListModel() : null);
-    installOnHoverIconsSupport(getListElementRenderer());
-    replacePasteAction();
-  }
-
-  private void replacePasteAction() {
-    getList().getActionMap().put("paste", new AbstractAction() {
-      @Override
-      public void actionPerformed(ActionEvent e) {
-        getSpeedSearch().type(CopyPasteManager.getInstance().getContents(DataFlavor.stringFlavor));
-        getSpeedSearch().update();
-      }
-    });
   }
 
   private void trackDimensions(@Nullable String dimensionKey) {
@@ -179,7 +151,7 @@ public class BranchActionGroupPopup extends FlatSpeedSearchPopup {
   }
 
   private void processOnSizeChanged() {
-    Dimension newSize = ObjectUtils.assertNotNull(getSize());
+    Dimension newSize = assertNotNull(getSize());
     int preferredHeight = getComponent().getPreferredSize().height;
     int realHeight = getComponent().getHeight();
     boolean shouldExpand = preferredHeight + myMeanRowHeight < realHeight;
@@ -198,7 +170,9 @@ public class BranchActionGroupPopup extends FlatSpeedSearchPopup {
     //ugly properties to distinguish user size changed from pack method call after Restore Size action performed
     myUserSizeChanged = !myInternalSizeChanged;
     myInternalSizeChanged = false;
-    myRestoreSizeButton.update();
+    if (myRestoreSizeButton != null) {
+      myRestoreSizeButton.update();
+    }
   }
 
   @NotNull
@@ -215,8 +189,10 @@ public class BranchActionGroupPopup extends FlatSpeedSearchPopup {
   }
 
   public void addSettingAction(@NotNull AnAction action) {
-    mySettingsActions.add(action);
-    mySettingsButton.update();
+    if (mySettingsButton != null) {
+      mySettingsActions.add(action);
+      mySettingsButton.update();
+    }
   }
 
   @NotNull
@@ -386,10 +362,7 @@ public class BranchActionGroupPopup extends FlatSpeedSearchPopup {
       super.customizeComponent(list, value, isSelected);
       myTextLabel.setIcon(null);
       myTextLabel.setDisabledIcon(null);
-      if (value instanceof PopupFactoryImpl.ActionItem) {
-        ((PopupFactoryImpl.ActionItem)value).setIconHovered(isSelected);
-      }
-      myIconLabel.setIcon(myDescriptor.getIconFor(value));
+      myIconLabel.setIcon(isSelected ? myDescriptor.getSelectedIconFor(value) : myDescriptor.getIconFor(value));
       PopupElementWithAdditionalInfo additionalInfoAction = getSpecificAction(value, PopupElementWithAdditionalInfo.class);
       updateInfoComponent(myInfoLabel, additionalInfoAction != null ? additionalInfoAction.getInfoText() : null, isSelected);
     }
@@ -486,7 +459,7 @@ public class BranchActionGroupPopup extends FlatSpeedSearchPopup {
       if (event != null && event.getSource() instanceof JComponent) {
         DataProvider dataProvider = DataManager.getDataProvider((JComponent)event.getSource());
         if (dataProvider != null) {
-          ObjectUtils.assertNotNull(POPUP_MODEL.getData(dataProvider)).refilter();
+          assertNotNull(POPUP_MODEL.getData(dataProvider)).refilter();
         }
       }
     }

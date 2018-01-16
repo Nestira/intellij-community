@@ -25,7 +25,6 @@ import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.*;
-import com.intellij.openapi.wm.FocusCommand;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.ex.IdeFocusTraversalPolicy;
 import com.intellij.ui.components.panels.NonOpaquePanel;
@@ -33,6 +32,7 @@ import com.intellij.ui.content.*;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.SmartList;
 import com.intellij.util.ui.UIUtil;
+import com.intellij.util.ui.accessibility.ScreenReader;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -98,7 +98,6 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
 
       NonOpaquePanel contentComponent = new NonOpaquePanel();
       contentComponent.setContent(myUI.getComponent());
-      contentComponent.setFocusCycleRoot(true);
 
       myComponent.add(contentComponent, BorderLayout.CENTER);
     }
@@ -195,7 +194,7 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
       if (trackFocus) {
         Content current = getSelectedContent();
         if (current != null) {
-          setSelectedContent(current, true, true, !forcedFocus);
+          setSelectedContent(current, true, true, !forcedFocus).notify(result);
         }
         else {
           result.setDone();
@@ -259,25 +258,24 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
 
       int newSize = myContents.size();
       if (newSize > 0 && trackSelection) {
-        ActionCallback result = new ActionCallback();
         if (indexToSelect > -1) {
           final Content toSelect = mySelectionHistory.size() > 0 ? mySelectionHistory.get(0) : myContents.get(indexToSelect);
           if (!isSelected(toSelect)) {
             if (myUI.isSingleSelection()) {
+              ActionCallback result = new ActionCallback();
               setSelectedContentCB(toSelect).notify(result);
+              return result;
             }
             else {
               addSelectedContent(toSelect);
-              result.setDone();
             }
           }
         }
-        return result;
       }
       else {
         mySelection.clear();
-        return ActionCallback.DONE;
       }
+      return ActionCallback.DONE;
     }
     finally {
       if (ApplicationManager.getApplication().isDispatchThread()) {
@@ -483,9 +481,7 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
 
         addSelectedContent(content);
 
-        if (requestFocus) {
-          return requestFocus(content, forcedFocus);
-        }
+        content.getComponent().transferFocus();
         return ActionCallback.DONE;
       }
     };
@@ -597,15 +593,8 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
     final Content toSelect = content == null ? getSelectedContent() : content;
     if (toSelect == null) return ActionCallback.REJECTED;
     assert myContents.contains(toSelect);
-
-
-    return getFocusManager().requestFocus(new FocusCommand(content, toSelect.getPreferredFocusableComponent()) {
-      @NotNull
-      @Override
-      public ActionCallback run() {
-        return doRequestFocus(toSelect);
-      }
-    }, forced);
+    JComponent preferredFocusableComponent = toSelect.getPreferredFocusableComponent();
+    return preferredFocusableComponent != null ? getFocusManager().requestFocusInProject(preferredFocusableComponent, myProject) : ActionCallback.REJECTED;
   }
 
   private IdeFocusManager getFocusManager() {

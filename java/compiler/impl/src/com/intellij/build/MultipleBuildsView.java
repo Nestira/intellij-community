@@ -17,18 +17,12 @@ package com.intellij.build;
 
 import com.intellij.build.events.BuildEvent;
 import com.intellij.build.events.FinishBuildEvent;
-import com.intellij.build.events.OutputBuildEvent;
 import com.intellij.build.events.StartBuildEvent;
-import com.intellij.execution.filters.Filter;
-import com.intellij.execution.process.ProcessHandler;
-import com.intellij.execution.ui.*;
-import com.intellij.execution.ui.layout.impl.RunnerLayoutUiImpl;
+import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionManager;
-import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.ComponentContainer;
 import com.intellij.openapi.ui.ThreeComponentsSplitter;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.wm.ToolWindow;
@@ -39,9 +33,9 @@ import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.content.Content;
 import com.intellij.ui.content.impl.ContentImpl;
 import com.intellij.util.Alarm;
-import com.intellij.util.Consumer;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.containers.TransferToEDTQueue;
 import com.intellij.util.ui.EdtInvocationManager;
 import com.intellij.util.ui.EmptyIcon;
 import com.intellij.util.ui.JBUI;
@@ -76,6 +70,8 @@ public class MultipleBuildsView implements BuildProgressListener, Disposable {
   private final AbstractViewManager myViewManager;
   private volatile Content myContent;
   private volatile DefaultActionGroup myToolbarActions;
+  private volatile boolean myDisposed;
+  private final TransferToEDTQueue<Runnable> myLaterInvocator;
 
   public MultipleBuildsView(Project project,
                             BuildContentManager buildContentManager,
@@ -88,6 +84,7 @@ public class MultipleBuildsView implements BuildProgressListener, Disposable {
     myThreeComponentsSplitter = new ThreeComponentsSplitter();
     Disposer.register(this, myThreeComponentsSplitter);
     myBuildsList = new JBList<>();
+    myBuildsList.setModel(new DefaultListModel<>());
     myBuildsList.setFixedCellHeight(UIUtil.LIST_FIXED_CELL_HEIGHT * 2);
     myBuildsList.installCellRenderer(obj -> {
       AbstractViewManager.BuildInfo buildInfo = (AbstractViewManager.BuildInfo)obj;
@@ -108,11 +105,16 @@ public class MultipleBuildsView implements BuildProgressListener, Disposable {
     myViewMap = ContainerUtil.newConcurrentMap();
     myBuildsMap = ContainerUtil.newConcurrentMap();
     myProgressWatcher = new ProgressWatcher();
+
+    myLaterInvocator = new TransferToEDTQueue<>("Multiple builds view queue", runnable -> {
+      runnable.run();
+      return true;
+    }, o -> myDisposed);
   }
 
   @Override
   public void dispose() {
-
+    myDisposed = true;
   }
 
   public Content getContent() {
@@ -176,107 +178,41 @@ public class MultipleBuildsView implements BuildProgressListener, Disposable {
       final AbstractViewManager.BuildInfo buildInfo = myBuildsMap.get(event.getId());
       assert buildInfo != null;
       if (event instanceof StartBuildEvent) {
-        buildInfo.message = event.getMessage();
+        StartBuildEvent startBuildEvent = (StartBuildEvent)event;
+        buildInfo.message = startBuildEvent.getMessage();
 
         DefaultListModel<AbstractViewManager.BuildInfo> listModel =
           (DefaultListModel<AbstractViewManager.BuildInfo>)myBuildsList.getModel();
         listModel.addElement(buildInfo);
 
-        final RunContentDescriptor contentDescriptor;
-        Supplier<RunContentDescriptor> contentDescriptorSupplier = ((StartBuildEvent)event).getContentDescriptorSupplier();
-        contentDescriptor = contentDescriptorSupplier != null ? contentDescriptorSupplier.get() : null;
-        ProcessHandler processHandler = ((StartBuildEvent)event).getProcessHandler();
         BuildView view = myViewMap.computeIfAbsent(buildInfo, info -> {
-          ExecutionConsole executionConsole = null;
-          BuildConsoleView buildConsoleView = null;
-          if (contentDescriptor != null) {
-            executionConsole = contentDescriptor.getExecutionConsole();
-            List<AnAction> leftToolbarActions = ContainerUtil.newArrayList();
-            RunnerLayoutUi layoutUi = contentDescriptor.getRunnerLayoutUi();
-            if (layoutUi instanceof RunnerLayoutUiImpl) {
-              RunnerLayoutUiImpl layoutUiImpl = (RunnerLayoutUiImpl)layoutUi;
-              layoutUiImpl.setLeftToolbarVisible(false);
-              layoutUiImpl.setContentToolbarBefore(false);
-              leftToolbarActions.addAll(layoutUiImpl.getActions());
-            }
-            JComponent component = contentDescriptor.getComponent();
-            AnAction[] leftToolbarActionsArray = leftToolbarActions.toArray(new AnAction[leftToolbarActions.size()]);
-            buildConsoleView = new BuildConsoleView() {
-              @Override
-              public void onEvent(BuildEvent event) {
-              }
-
-              @Override
-              public AnAction[] createConsoleActions() {
-                return leftToolbarActionsArray;
-              }
-
-              @Override
-              public JComponent getComponent() {
-                return component;
-              }
-
-              @Override
-              public JComponent getPreferredFocusableComponent() {
-                ExecutionConsole console = contentDescriptor.getExecutionConsole();
-                if (console != null) return console.getPreferredFocusableComponent();
-                return (component instanceof ComponentContainer)
-                       ? ((ComponentContainer)component).getPreferredFocusableComponent()
-                       : component;
-              }
-
-              @Override
-              public void dispose() {
-              }
-            };
-            Disposer.register(buildConsoleView, contentDescriptor);
-          }
-          if (buildConsoleView == null) {
-            buildConsoleView = new BuildTextConsoleView(myProject);
-            executionConsole = (ExecutionConsole)buildConsoleView;
-          }
-          if (executionConsole instanceof ConsoleView) {
-            for (Filter filter : ((StartBuildEvent)event).getExecutionFilters()) {
-              ((ConsoleView)executionConsole).addMessageFilter(filter);
-            }
-          }
-
-          final BuildView buildView =
-            new BuildView(myProject, buildConsoleView, ((StartBuildEvent)event),
-                          "build.toolwindow." + myViewManager.getViewName() + ".selection.state",
-                          myViewManager.isConsoleEnabledByDefault());
-          if (processHandler != null) {
-            if (buildConsoleView instanceof ConsoleView) {
-              ((ConsoleView)buildConsoleView).attachToProcess(processHandler);
-              Consumer<ConsoleView> attachedConsoleConsumer = ((StartBuildEvent)event).getAttachedConsoleConsumer();
-              if (attachedConsoleConsumer != null) {
-                attachedConsoleConsumer.consume((ConsoleView)buildConsoleView);
-              }
-            }
-            else if (executionConsole instanceof ConsoleView) {
-              Consumer<ConsoleView> attachedConsoleConsumer = ((StartBuildEvent)event).getAttachedConsoleConsumer();
-              if (attachedConsoleConsumer != null) {
-                attachedConsoleConsumer.consume((ConsoleView)executionConsole);
-              }
-            }
-            if (!processHandler.isStartNotified()) {
-              processHandler.startNotify();
-            }
-          }
+          final BuildDescriptor buildDescriptor = new DefaultBuildDescriptor(
+            startBuildEvent.getId(), startBuildEvent.getBuildTitle(), startBuildEvent.getWorkingDir(), startBuildEvent.getEventTime());
+          String selectionStateKey = "build.toolwindow." + myViewManager.getViewName() + ".selection.state";
+          final BuildView buildView = new BuildView(myProject, buildDescriptor, selectionStateKey, myViewManager);
           Disposer.register(myThreeComponentsSplitter, buildView);
           return buildView;
         });
+        view.onEvent(startBuildEvent);
 
         myContent.setPreferredFocusedComponent(view::getPreferredFocusableComponent);
+
+        RunContentDescriptor contentDescriptor;
+        Supplier<RunContentDescriptor> contentDescriptorSupplier = startBuildEvent.getContentDescriptorSupplier();
+        contentDescriptor = contentDescriptorSupplier != null ? contentDescriptorSupplier.get() : null;
         if (contentDescriptor != null) {
           boolean activateToolWindow = contentDescriptor.isActivateToolWindowWhenAdded();
           buildInfo.activateToolWindowWhenAdded = activateToolWindow;
+          if (contentDescriptor instanceof BuildContentDescriptor) {
+            buildInfo.activateToolWindowWhenFailed = ((BuildContentDescriptor)contentDescriptor).isActivateToolWindowWhenFailed();
+          }
           boolean focusContent = contentDescriptor.isAutoFocusContent();
           myBuildContentManager.setSelectedContent(
             myContent, focusContent, focusContent, activateToolWindow, contentDescriptor.getActivationCallback());
+          Disposer.register(view, contentDescriptor);
         }
         else {
-          myBuildContentManager.setSelectedContent(myContent, true, true, true, null);
+          myBuildContentManager.setSelectedContent(myContent, true, true, false, null);
         }
         buildInfo.content = myContent;
 
@@ -294,9 +230,9 @@ public class MultipleBuildsView implements BuildProgressListener, Disposable {
           myThreeComponentsSplitter.repaint();
 
           for (BuildView consoleView : myViewMap.values()) {
-            BuildConsoleView buildConsoleView = consoleView.getPrimaryView();
-            if (buildConsoleView instanceof BuildTreeConsoleView) {
-              ((BuildTreeConsoleView)buildConsoleView).hideRootNode();
+            BuildTreeConsoleView buildConsoleView = consoleView.getView(BuildTreeConsoleView.class.getName(), BuildTreeConsoleView.class);
+            if (buildConsoleView != null) {
+              buildConsoleView.hideRootNode();
             }
           }
         }
@@ -305,7 +241,7 @@ public class MultipleBuildsView implements BuildProgressListener, Disposable {
         }
         myViewManager.onBuildStart(buildInfo);
         myProgressWatcher.addBuild(buildInfo);
-        ((BuildContentManagerImpl)myBuildContentManager).startBuildNotified(buildInfo.content);
+        ((BuildContentManagerImpl)myBuildContentManager).startBuildNotified(buildInfo, buildInfo.content, startBuildEvent.getProcessHandler());
       }
       else {
         if (event instanceof FinishBuildEvent) {
@@ -313,38 +249,22 @@ public class MultipleBuildsView implements BuildProgressListener, Disposable {
           buildInfo.message = event.getMessage();
           buildInfo.result = ((FinishBuildEvent)event).getResult();
           myProgressWatcher.stopBuild(buildInfo);
-          ((BuildContentManagerImpl)myBuildContentManager).finishBuildNotified(buildInfo.content);
+          ((BuildContentManagerImpl)myBuildContentManager).finishBuildNotified(buildInfo, buildInfo.content);
           myViewManager.onBuildFinish(buildInfo);
         }
         else {
           buildInfo.statusMessage = event.getMessage();
         }
-      }
 
-      BuildView view = myViewMap.get(buildInfo);
-      if (event instanceof OutputBuildEvent) {
-        ComponentContainer consoleView = view.getSecondaryView();
-        if (consoleView instanceof BuildConsoleView) {
-          ((BuildConsoleView)consoleView).onEvent(event);
-        }
-        else if ((consoleView instanceof ConsoleView)) {
-          ((ConsoleView)consoleView).print(event.getMessage(), ((OutputBuildEvent)event).isStdOut()
-                                                               ? ConsoleViewContentType.NORMAL_OUTPUT
-                                                               : ConsoleViewContentType.ERROR_OUTPUT);
-        }
-      }
-      else {
-        view.getPrimaryView().onEvent(event);
+        myViewMap.get(buildInfo).onEvent(event);
       }
     });
 
     if (myContent == null) {
       myPostponedRunnables.addAll(runOnEdt);
       if (isInitializeStarted.compareAndSet(false, true)) {
-        UIUtil.invokeLaterIfNeeded(() -> {
+        myLaterInvocator.offer(() -> {
           myBuildsList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-          DefaultListModel<AbstractViewManager.BuildInfo> listModel = new DefaultListModel<>();
-          myBuildsList.setModel(listModel);
           myBuildsList.addListSelectionListener(new ListSelectionListener() {
             @Override
             public void valueChanged(ListSelectionEvent e) {
@@ -399,7 +319,7 @@ public class MultipleBuildsView implements BuildProgressListener, Disposable {
       }
     }
     else {
-      UIUtil.invokeLaterIfNeeded(() -> {
+      myLaterInvocator.offer(() -> {
         for (Runnable runnable : runOnEdt) {
           runnable.run();
         }

@@ -3,6 +3,7 @@ package org.jetbrains.ether;
 
 import com.intellij.openapi.util.SystemInfo;
 import org.jetbrains.jps.builders.BuildResult;
+import org.jetbrains.jps.builders.CompileScopeTestBuilder;
 import org.jetbrains.jps.model.JpsModuleRootModificationUtil;
 import org.jetbrains.jps.model.module.JpsModule;
 
@@ -11,7 +12,6 @@ import java.util.*;
 
 /**
  * @author Eugene Zhuravlev
- * Date: 09-Oct-17
  */
 public class Java9Test extends IncrementalTestCase {
 
@@ -27,6 +27,13 @@ public class Java9Test extends IncrementalTestCase {
       return false;
     }
     return super.shouldRunTest();
+  }
+
+  public void testModuleInfoAdded() {
+    // expected result: the whole target is recompiled after the module-info.java file was newly added
+    // because necessary 'require' directives may be missing from the newly added module-info file
+    final BuildResult buildResult = doTest();
+    buildResult.assertSuccessful();
   }
 
   public void testRemoveModuleRequires() {
@@ -84,6 +91,17 @@ public class Java9Test extends IncrementalTestCase {
     buildResult.assertSuccessful();
   }
 
+  public void testIntegrateAfterErrors() {
+    setupInitialProject();
+    setupModules();
+    
+    doBuild(CompileScopeTestBuilder.rebuild().allModules()).assertFailed();
+    modify(0);
+    doBuild(CompileScopeTestBuilder.make().allModules()).assertSuccessful();
+    modify(1);
+    doBuild(CompileScopeTestBuilder.make().allModules()).assertFailed();
+  }
+  
   protected BuildResult doTestBuild(int makesCount) {
     setupModules();
     return super.doTestBuild(makesCount);

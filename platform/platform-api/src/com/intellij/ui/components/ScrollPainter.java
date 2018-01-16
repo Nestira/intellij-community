@@ -33,7 +33,7 @@ import java.util.function.IntSupplier;
  */
 class ScrollPainter extends RegionPainter.Alpha {
   private static final Color x0D = gray("mac.scroll.thumb.darcula.border", 0x0D);
-  private static final Color xA6 = gray("mac.scroll.thumb.darcula.color", 0xA6);
+  private static final Color xA6 = gray("mac.scroll.thumb.darcula.fill", 0xA6);
 
   private static Color gray(String key, int defaultValue) {
     return new JBColor(() -> {
@@ -50,8 +50,8 @@ class ScrollPainter extends RegionPainter.Alpha {
   }
 
   static final class Track {
-    static final RegionPainter<Float> DARCULA = new ScrollPainter(0, .0f, .1f, Gray.x80, null);
-    static final RegionPainter<Float> DEFAULT = DARCULA;
+    static final RegionPainter<Float> DARCULA = new TrackPainter("ide.scroll.track.darcula.alpha", "ide.scroll.track.darcula.fill");
+    static final RegionPainter<Float> DEFAULT = new TrackPainter("ide.scroll.track.default.alpha", "ide.scroll.track.default.fill");
   }
 
   static final class Thumb {
@@ -73,23 +73,23 @@ class ScrollPainter extends RegionPainter.Alpha {
   static final class EditorThumb {
     private static final RegionPainter<Float> DARCULA_OLD = new ScrollPainter(0, .33f, .12f, Gray.xA6, Gray.x1A);
     private static final RegionPainter<Float> DARCULA_NEW = new EditorThumbPainter(
-      1,
+      0,
       value("win.editor.thumb.darcula.alpha.base", 89),
       value("win.editor.thumb.darcula.alpha.delta", 166),
       new ColorFunction(
-        value("win.editor.thumb.darcula.color.min", 0x8C),
-        value("win.editor.thumb.darcula.color.max", 0xA1)),
+        value("win.editor.thumb.darcula.fill.min", 0x8C),
+        value("win.editor.thumb.darcula.fill.max", 0xA1)),
       gray("win.editor.thumb.darcula.border", 0x1F));
 
     private static final RegionPainter<Float> DEFAULT_OLD = new Protected(new SubtractColor(0, .25f, .15f, Gray.x80, Gray.xA6),
                                                                           new ScrollPainter(0, .25f, .15f, Gray.x80, Gray.x59));
     private static final RegionPainter<Float> DEFAULT_NEW = new EditorThumbPainter(
-      2,
+      0,
       value("win.editor.thumb.default.alpha.base", 140),
       value("win.editor.thumb.default.alpha.delta", 115),
       new ColorFunction(
-        value("win.editor.thumb.default.color.min", 0x9E),
-        value("win.editor.thumb.default.color.max", 0xBD)),
+        value("win.editor.thumb.default.fill.min", 0x9E),
+        value("win.editor.thumb.default.fill.max", 0xBD)),
       gray("win.editor.thumb.default.border", 0x8C));
 
     static final RegionPainter<Float> DARCULA = new RegionPainter<Float>() {
@@ -114,8 +114,8 @@ class ScrollPainter extends RegionPainter.Alpha {
         value("mac.editor.thumb.darcula.alpha.base", 102),
         value("mac.editor.thumb.darcula.alpha.delta", 153),
         new ColorFunction(
-          value("mac.editor.thumb.darcula.color.min", 0x8C),
-          value("mac.editor.thumb.darcula.color.max", 0xA1)),
+          value("mac.editor.thumb.darcula.fill.min", 0x8C),
+          value("mac.editor.thumb.darcula.fill.max", 0xA1)),
         gray("mac.editor.thumb.darcula.border", 0x1F));
 
       private static final RegionPainter<Float> DEFAULT_OLD = Thumb.Mac.DEFAULT;
@@ -124,8 +124,8 @@ class ScrollPainter extends RegionPainter.Alpha {
         value("mac.editor.thumb.default.alpha.base", 102),
         value("mac.editor.thumb.default.alpha.delta", 153),
         new ColorFunction(
-          value("mac.editor.thumb.default.color.min", 0x59),
-          value("mac.editor.thumb.default.color.max", 0x73)),
+          value("mac.editor.thumb.default.fill.min", 0x59),
+          value("mac.editor.thumb.default.fill.max", 0x73)),
         null);
 
       static final RegionPainter<Float> DARCULA = new RegionPainter<Float>() {
@@ -375,6 +375,20 @@ class ScrollPainter extends RegionPainter.Alpha {
     @Override
     protected void paint(Graphics2D g, int x, int y, int width, int height) {
       RectanglePainter.paint(g, x, y, width, height, SystemInfo.isMac ? Math.min(width, height) : 0, myFillColor, myDrawColor);
+    }
+  }
+
+  private static class TrackPainter extends ScrollPainter {
+    private final IntSupplier supplier;
+
+    private TrackPainter(String alpha, String fill) {
+      super(0, 0, 0, gray(fill, 0x80), null);
+      supplier = value(alpha, 26);
+    }
+
+    @Override
+    protected float getAlpha(Float value) {
+      return value == null ? 0 : value * supplier.getAsInt() / 255;
     }
   }
 }

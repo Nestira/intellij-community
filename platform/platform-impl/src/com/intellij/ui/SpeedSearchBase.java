@@ -336,7 +336,7 @@ public abstract class SpeedSearchBase<Comp extends JComponent> extends SpeedSear
       if (!UIUtil.isReallyTypedEvent(e)) return;
 
       char c = e.getKeyChar();
-      if (Character.isLetterOrDigit(c) || SpeedSearch.PUNCTUATION_MARKS.indexOf(c) != -1) {
+      if (Character.isLetterOrDigit(c) || (!Character.isWhitespace(c) && SpeedSearch.PUNCTUATION_MARKS.indexOf(c) != -1)) {
         manageSearchPopup(new SearchPopup(String.valueOf(c)));
         e.consume();
       }
@@ -576,6 +576,10 @@ public abstract class SpeedSearchBase<Comp extends JComponent> extends SpeedSear
 
     fireStateChanged();
 
+    //select here!
+
+
+
     if (mySearchPopup == null || !myComponent.isDisplayable()) return;
 
     if (project != null) {
@@ -596,6 +600,8 @@ public abstract class SpeedSearchBase<Comp extends JComponent> extends SpeedSear
     }
     myPopupLayeredPane.add(mySearchPopup, JLayeredPane.POPUP_LAYER);
     moveSearchPopup();
+
+    mySearchPopup.refreshSelection();
   }
 
   private void moveSearchPopup() {

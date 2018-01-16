@@ -48,7 +48,7 @@ public class HintManagerImpl extends HintManager implements Disposable {
   private final AnActionListener myAnActionListener;
   private final MyEditorManagerListener myEditorManagerListener;
   private final EditorMouseAdapter myEditorMouseListener;
-  private final FocusListener myEditorFocusListener;
+
   private final DocumentListener myEditorDocumentListener;
   private final VisibleAreaListener myVisibleAreaListener;
   private final CaretListener myCaretMoveListener;
@@ -59,6 +59,7 @@ public class HintManagerImpl extends HintManager implements Disposable {
   private final List<HintInfo> myHintsStack = new ArrayList<>();
   private Editor myLastEditor;
   private final Alarm myHideAlarm = new Alarm();
+  private boolean myRequestFocusForNextHint;
 
   private static int getPriority(QuestionAction action) {
     return action instanceof PriorityQuestionAction ? ((PriorityQuestionAction)action).getPriority() : 0;
@@ -124,37 +125,6 @@ public class HintManagerImpl extends HintManager implements Disposable {
       }
     };
 
-    myEditorFocusListener = new FocusAdapter() {
-      @Override
-      public void focusLost(final FocusEvent e) {
-        //if (UIUtil.isFocusProxy(e.getOppositeComponent())) return;
-        myHideAlarm.addRequest(new Runnable() {
-          private boolean myNotFocused; // previous focus state
-
-          @Override
-          public void run() {
-            // see implementation here: com.intellij.ui.popup.AbstractPopup.isFocused(java.awt.Component[])
-            // the following method may return null while switching focus between popups:
-            // KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner()
-            // http://docs.oracle.com/javase/7/docs/webnotes/tsg/TSG-Desktop/html/awt.html#gdabn
-            boolean notFocused = !JBPopupFactory.getInstance().isChildPopupFocused(e.getComponent());
-            if (myNotFocused && notFocused) {
-              // hide all hints if a child popup is not focused now
-              // and if it was not focused 200 milliseconds ago
-              hideAllHints();
-            }
-            // TODO: find a way to replace this hack with com.intellij.openapi.wm.IdeFocusManager
-            myNotFocused = notFocused;
-          }
-        }, 200);
-      }
-
-      @Override
-      public void focusGained(FocusEvent e) {
-        myHideAlarm.cancelAllRequests();
-      }
-    };
-
     myEditorDocumentListener = new DocumentListener() {
       @Override
       public void documentChanged(DocumentEvent event) {
@@ -180,6 +150,20 @@ public class HintManagerImpl extends HintManager implements Disposable {
   @Override
   public boolean isHint(Window component) {
     return myHintsStack.contains(component);
+  }
+
+  /**
+   * Sets whether the next {@code showXxx} call will request the focus to the
+   * newly shown tooltip. Note the flag applies only to the next call, i.e. is
+   * reset to {@code false} after any {@code showXxx} is called.
+   *
+   * <p>Note: This method was created to avoid the code churn associated with
+   * creating an overload to every {@code showXxx} method with an additional
+   * {@code boolean requestFocus} parameter </p>
+   */
+  @Override
+  public void setRequestFocusForNextHint(boolean requestFocus) {
+    myRequestFocusForNextHint = requestFocus;
   }
 
   @NotNull
@@ -331,8 +315,9 @@ public class HintManagerImpl extends HintManager implements Disposable {
 
     // Set focus to control so that screen readers will announce the tooltip contents.
     // Users can press "ESC" to return to the editor.
-    if (ScreenReader.isActive()) {
+    if (myRequestFocusForNextHint) {
       hintInfo.setRequestFocus(true);
+      myRequestFocusForNextHint = false;
     }
     doShowInGivenLocation(hint, editor, p, hintInfo, true);
 
@@ -861,7 +846,6 @@ public class HintManagerImpl extends HintManager implements Disposable {
     if (myLastEditor != editor) {
       if (myLastEditor != null) {
         myLastEditor.removeEditorMouseListener(myEditorMouseListener);
-        myLastEditor.getContentComponent().removeFocusListener(myEditorFocusListener);
         myLastEditor.getDocument().removeDocumentListener(myEditorDocumentListener);
         myLastEditor.getScrollingModel().removeVisibleAreaListener(myVisibleAreaListener);
         myLastEditor.getCaretModel().removeCaretListener(myCaretMoveListener);
@@ -870,7 +854,6 @@ public class HintManagerImpl extends HintManager implements Disposable {
       myLastEditor = editor;
       if (myLastEditor != null) {
         myLastEditor.addEditorMouseListener(myEditorMouseListener);
-        myLastEditor.getContentComponent().addFocusListener(myEditorFocusListener);
         myLastEditor.getDocument().addDocumentListener(myEditorDocumentListener);
         myLastEditor.getScrollingModel().addVisibleAreaListener(myVisibleAreaListener);
         myLastEditor.getCaretModel().addCaretListener(myCaretMoveListener);

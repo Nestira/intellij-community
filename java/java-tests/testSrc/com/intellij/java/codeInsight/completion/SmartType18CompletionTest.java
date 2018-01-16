@@ -110,7 +110,8 @@ public class SmartType18CompletionTest extends LightFixtureCompletionTestCase {
     myFixture.addClass("package foo; class ImplInaccessible implements intf.Intf<String> {}");
 
     configureByTestName();
-    myFixture.assertPreferredCompletionItems(0, "ImplBar::new", "ImplFoo::new", "() -> ");
+    myFixture.assertPreferredCompletionItems(0, "() -> ", "ImplBar::new", "ImplFoo::new");
+    myFixture.getLookup().setCurrentItem(myFixture.getLookupElements()[1]);
     myFixture.type('\n');
     checkResultByFile("/" + getTestName(false) + "-out.java");
   }
@@ -260,6 +261,12 @@ public void testConvertToObjectStream() {
 
   public void testPreferLambdaOverGenericGetter() {
     configureByTestName();
-    myFixture.assertPreferredCompletionItems(0, "isEmpty", "s -> ", "getSomeGenericValue");
+    myFixture.assertPreferredCompletionItems(0, "s -> ", "isEmpty", "getSomeGenericValue");
   }
+
+  public void testNoInaccessibleConstructorRef() {
+    configureByTestName();
+    assertOrderedEquals(myFixture.getLookupElementStrings(), "() -> ");
+  }
+
 }

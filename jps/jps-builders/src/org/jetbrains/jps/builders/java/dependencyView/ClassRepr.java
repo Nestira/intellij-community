@@ -29,7 +29,6 @@ import java.util.*;
 
 /**
  * @author: db
- * Date: 01.02.11
  */
 public class ClassRepr extends ClassFileRepr {
   private final TypeRepr.ClassType mySuperClass;
@@ -72,6 +71,11 @@ public class ClassRepr extends ClassFileRepr {
     return myRetentionPolicy;
   }
 
+  public Set<ElemType> getAnnotationTargets() {
+    final Set<ElemType> targets = myAnnotationTargets;
+    return targets != null ? Collections.unmodifiableSet(targets) : Collections.emptySet();
+  }
+
   public boolean isInterface() {
     return (access & Opcodes.ACC_INTERFACE) != 0;
   }
@@ -93,6 +97,8 @@ public class ClassRepr extends ClassFileRepr {
     public abstract boolean retentionChanged();
 
     public abstract boolean extendsAdded();
+
+    public abstract boolean targetAttributeCategoryMightChange();
 
     public boolean no() {
       return base() == NONE &&
@@ -153,6 +159,17 @@ public class ClassRepr extends ClassFileRepr {
         return !((myRetentionPolicy == null && pastClass.myRetentionPolicy == RetentionPolicy.CLASS) ||
                  (myRetentionPolicy == RetentionPolicy.CLASS && pastClass.myRetentionPolicy == null) ||
                  (myRetentionPolicy == pastClass.myRetentionPolicy));
+      }
+
+      @Override
+      public boolean targetAttributeCategoryMightChange() {
+        final Specifier<ElemType, Difference> targetsDiff = targets();
+        if (!targetsDiff.unchanged()) {
+          return targetsDiff.added().contains(ElemType.TYPE_USE) ||
+                 targetsDiff.removed().contains(ElemType.TYPE_USE) ||
+                 pastClass.getAnnotationTargets().contains(ElemType.TYPE_USE);
+        }
+        return false;
       }
 
       @Override

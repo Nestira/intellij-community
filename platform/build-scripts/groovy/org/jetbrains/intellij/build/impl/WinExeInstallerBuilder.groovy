@@ -37,6 +37,28 @@ class WinExeInstallerBuilder {
     this.jreDirectoryPath = jreDirectoryPath
   }
 
+  private void generateInstallationConfigFileForSilentMode() {
+    File silentConfigFile = new File (customizer.silentInstallationConfig == null ?
+                          "$buildContext.paths.communityHome/platform/build-scripts/resources/win/nsis/silent.config" :
+                          customizer.silentInstallationConfig)
+    if (! silentConfigFile.exists()) {
+      buildContext.messages.error(
+        "Silent config file for Windows installer won't be generated. The template doesn't exist: '${silentConfig}'")
+    }
+    else {
+      def extensionsList = customizer.fileAssociations
+      String associations = "\n\n; List of associations. To create an association change value to 1.\n"
+      if (! extensionsList.isEmpty()) {
+        associations += extensionsList.collect { "$it=0\n" }.join("")
+      }
+      else {
+        associations = "\n\n; There are no associations for the product.\n"
+      }
+      silentConfigFile.append(associations)
+      buildContext.ant.copy(file: silentConfigFile, todir: "${buildContext.paths.artifacts}")
+    }
+  }
+
   void buildInstaller(String winDistPath) {
     if (!SystemInfoRt.isWindows && !SystemInfoRt.isLinux) {
       buildContext.messages.warning("Windows installer can be built only under Windows or Linux")
@@ -62,6 +84,9 @@ class WinExeInstallerBuilder {
         exclude(name: "version*")
       }
     }
+
+    generateInstallationConfigFileForSilentMode()
+
     if (SystemInfoRt.isLinux) {
       File ideaNsiPath = new File(box, "nsiconf/idea.nsi")
       ideaNsiPath.text = BuildUtils.replaceAll(ideaNsiPath.text, ["\${IMAGES_LOCATION}\\": "\${IMAGES_LOCATION}/"], "")

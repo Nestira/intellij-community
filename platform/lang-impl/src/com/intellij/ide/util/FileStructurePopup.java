@@ -24,6 +24,7 @@ import com.intellij.ide.structureView.ModelListener;
 import com.intellij.ide.structureView.StructureView;
 import com.intellij.ide.structureView.StructureViewModel;
 import com.intellij.ide.structureView.impl.common.PsiTreeElementBase;
+import com.intellij.ide.structureView.newStructureView.TreeActionWrapper;
 import com.intellij.ide.structureView.newStructureView.TreeActionsOwner;
 import com.intellij.ide.structureView.newStructureView.TreeModelWrapper;
 import com.intellij.ide.util.treeView.AbstractTreeNode;
@@ -35,11 +36,11 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.MnemonicHelper;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.Experiments;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileEditor;
+import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.fileEditor.ex.IdeDocumentHistory;
 import com.intellij.openapi.ide.CopyPasteManager;
@@ -111,8 +112,7 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
   private static final Logger LOG = Logger.getInstance("#com.intellij.ide.util.FileStructurePopup");
   private static final String NARROW_DOWN_PROPERTY_KEY = "FileStructurePopup.narrowDown";
 
-  private final boolean myUseATM = ApplicationManager.getApplication().isUnitTestMode() ||
-                                   Experiments.isFeatureEnabled("structure.view.async.tree.model");
+  private final boolean myUseATM = true; //todo inline & remove
 
   private final Project myProject;
   private final FileEditor myFileEditor;
@@ -167,6 +167,7 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
     IdeFocusManager.getInstance(myProject).typeAheadUntil(myTreeHasBuilt, "FileStructurePopup");
 
     myTreeActionsOwner = new TreeStructureActionsOwner(myTreeModel);
+    myTreeActionsOwner.setActionIncluded(Sorter.ALPHA_SORTER, true);
     myTreeModelWrapper = new TreeModelWrapper(myTreeModel, myTreeActionsOwner);
 
     myTreeStructure = new SmartTreeStructure(project, myTreeModelWrapper) {
@@ -205,6 +206,7 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
       myAsyncTreeModel = new AsyncTreeModel(myStructureTreeModel);
       myAsyncTreeModel.setRootImmediately(myStructureTreeModel.getRootImmediately());
       myTree = new MyTree(myAsyncTreeModel);
+      registerAutoExpandListener(myTree, myTreeModel);
       Disposer.register(this, () -> myTreeModelWrapper.dispose());
       Disposer.register(this, myAsyncTreeModel);
 
@@ -317,7 +319,20 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
     //final long time = System.currentTimeMillis();
     JComponent panel = createCenterPanel();
     MnemonicHelper.init(panel);
-    myPopup = JBPopupFactory.getInstance().createComponentPopupBuilder(panel, null)
+    myTree.addTreeSelectionListener(new TreeSelectionListener() {
+      @Override
+      public void valueChanged(TreeSelectionEvent e) {
+        if (myPopup.isVisible()) {
+          PopupUpdateProcessor updateProcessor = myPopup.getUserData(PopupUpdateProcessor.class);
+          if (updateProcessor != null) {
+            AbstractTreeNode node = getSelectedNode();
+            updateProcessor.updatePopup(node);
+          }
+        }
+      }
+    });
+
+    myPopup = JBPopupFactory.getInstance().createComponentPopupBuilder(panel, myTree)
       .setTitle(myTitle)
       .setResizable(true)
       .setModalContext(false)
@@ -331,18 +346,6 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
       .setCancelCallback(() -> myCanClose)
       .createPopup();
 
-    myTree.addTreeSelectionListener(new TreeSelectionListener() {
-      @Override
-      public void valueChanged(TreeSelectionEvent e) {
-        if (myPopup.isVisible()) {
-          PopupUpdateProcessor updateProcessor = myPopup.getUserData(PopupUpdateProcessor.class);
-          if (updateProcessor != null) {
-            AbstractTreeNode node = getSelectedNode();
-            updateProcessor.updatePopup(node);
-          }
-        }
-      }
-    });
     Disposer.register(myPopup, this);
     Disposer.register(myPopup, new Disposable() {
       @Override
@@ -370,7 +373,6 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
 
     rebuildAndSelect(false, myInitialElement).processed(path -> UIUtil.invokeLaterIfNeeded(() -> {
       TreeUtil.ensureSelection(myTree);
-      FilteringTreeBuilder.revalidateTree(myTree);
       myTreeHasBuilt.setDone();
       installUpdater();
     }));
@@ -473,7 +475,6 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
       myTree.expandPath(path);
       TreeUtil.selectPath(myTree, path);
       TreeUtil.ensureSelection(myTree);
-      FilteringTreeBuilder.revalidateTree(myTree);
       Object userObject = path == null ? null : TreeUtil.getUserObject(path.getLastPathComponent());
       if (userObject != null && Comparing.equal(element, unwrapValue(userObject))) {
         myInitialNodeIsLeaf = myFilteringStructure.getChildElements(userObject).length == 0;
@@ -495,8 +496,7 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
         }
       }
     };
-    myStructureTreeModel.getInvoker().invokeLaterIfNeeded(
-      () -> myAsyncTreeModel.accept(visitor).thenAsync(fallback).processed(result));
+    myAsyncTreeModel.accept(visitor).thenAsync(fallback).processed(result);
     return result;
   }
 
@@ -512,8 +512,7 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
       if (o instanceof AbstractTreeNode) ((AbstractTreeNode)o).update();
       return TreeVisitor.Action.CONTINUE;
     };
-    rebuild(false).processed(ignore1 -> myStructureTreeModel.getInvoker().invokeLater(
-      () -> myAsyncTreeModel.accept(visitor).processed(ignore2 -> result.setResult(null))));
+    rebuild(false).processed(ignore1 -> myAsyncTreeModel.accept(visitor).processed(ignore2 -> result.setResult(null)));
     return result;
   }
 
@@ -599,8 +598,11 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
     new ClickListener() {
       @Override
       public boolean onClick(@NotNull MouseEvent e, int clickCount) {
-        TreePath path = myTree.getPathForLocation(e.getX(), e.getY());
-        if (path == null) return false; // user wants to expand/collapse a node
+        TreePath path = myTree.getClosestPathForLocation(e.getX(), e.getY());
+        Rectangle bounds = path == null ? null : myTree.getPathBounds(path);
+        if (bounds == null || 
+            bounds.x > e.getX() ||
+            bounds.y > e.getY() || bounds.y + bounds.height < e.getY()) return false;
         navigateSelectedElement();
         return true;
       }
@@ -634,6 +636,11 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
         }
         if (PlatformDataKeys.FILE_EDITOR.is(dataId)) {
           return myFileEditor;
+        }
+        if (OpenFileDescriptor.NAVIGATE_IN_EDITOR.is(dataId)) {
+          if (myFileEditor instanceof TextEditor) {
+            return ((TextEditor)myFileEditor).getEditor();
+          }
         }
         if (CommonDataKeys.PSI_ELEMENT.is(dataId)) {
           return getSelectedElements().filter(PsiElement.class).first();
@@ -680,13 +687,19 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
   @NotNull
   protected JComponent createSettingsButton() {
     JLabel label = new JLabel(AllIcons.General.SecondaryGroup);
+    label.setBorder(JBUI.Borders.empty(0, 2));
     label.setHorizontalAlignment(SwingConstants.RIGHT);
-    label.setVerticalAlignment(SwingConstants.TOP);
+    label.setVerticalAlignment(SwingConstants.CENTER);
+
+    List<AnAction> sorters = createSorters();
     new ClickListener() {
       @Override
       public boolean onClick(@NotNull MouseEvent event, int clickCount) {
         DefaultActionGroup group = new DefaultActionGroup();
-        //addSorters(group);
+        if (!sorters.isEmpty()) {
+          group.addAll(sorters);
+          group.addSeparator();
+        }
         //addGroupers(group);
         //addFilters(group);
 
@@ -722,6 +735,44 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
     return label;
   }
 
+  protected List<AnAction> createSorters() {
+    List<AnAction> actions = new ArrayList<>();
+    for (Sorter sorter : myTreeModel.getSorters()) {
+      if (sorter.isVisible()) {
+        actions.add(new MyTreeActionWrapper(sorter));
+      }
+    }
+    return actions;
+  }
+
+  private class MyTreeActionWrapper extends TreeActionWrapper {
+    private final TreeAction myAction;
+
+    public MyTreeActionWrapper(TreeAction action) {
+      super(action, myTreeActionsOwner);
+      myAction = action;
+      myTreeActionsOwner.setActionIncluded(action, getDefaultValue(action));
+    }
+
+    @Override
+    public void update(AnActionEvent e) {
+      super.update(e);
+      e.getPresentation().setIcon(null);
+    }
+
+    @Override
+    public void setSelected(AnActionEvent e, boolean state) {
+      boolean actionState = TreeModelWrapper.shouldRevert(myAction) ? !state : state;
+      myTreeActionsOwner.setActionIncluded(myAction, actionState);
+      saveState(myAction, state);
+      rebuild(false).processed(ignore -> {
+        if (mySpeedSearch.isPopupActive()) {
+          mySpeedSearch.refreshSelection();
+        }
+      });
+    }
+  }
+
   @Nullable
   private AbstractTreeNode getSelectedNode() {
     TreePath path = myTree.getSelectionPath();
@@ -744,8 +795,8 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
     commandProcessor.executeCommand(myProject, () -> {
       if (selectedNode != null) {
         if (selectedNode.canNavigateToSource()) {
-          myPopup.cancel();
           selectedNode.navigate(true);
+          myPopup.cancel();
           succeeded.set(true);
         }
         else {
@@ -785,7 +836,7 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
           saveState(action, state);
         }
         myTreeActionsOwner.setActionIncluded(action, isRevertedStructureFilter != state);
-        rebuild(action instanceof FileStructureFilter).processed(ignore -> {
+        rebuild(false).processed(ignore -> {
           if (mySpeedSearch.isPopupActive()) {
             mySpeedSearch.refreshSelection();
           }
@@ -829,24 +880,21 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
     myStructureTreeModel.getInvoker().invokeLaterIfNeeded(() -> {
       if (refilterOnly) {
         myFilteringStructure.refilter();
-        myStructureTreeModel.invalidate().rejected(ignore -> result.setError("rejected")).done(
-          ignore ->
+        myStructureTreeModel.invalidate(
+          () ->
             (selection == null ? myAsyncTreeModel.accept(o -> TreeVisitor.Action.CONTINUE) : select(selection))
               .rejected(ignore2 -> result.setError("rejected"))
               .done(p -> UIUtil.invokeLaterIfNeeded(
                 () -> {
-                  TreeUtil.expand(getTree(), 2);
+                  TreeUtil.expand(getTree(), myTreeModel instanceof StructureViewCompositeModel ? 3 : 2);
                   TreeUtil.ensureSelection(myTree);
                   mySpeedSearch.refreshSelection();
-                  FilteringTreeBuilder.revalidateTree(myTree);
                   result.setResult(p);
                 })));
       }
       else {
         myTreeStructure.rebuildTree();
-        myStructureTreeModel.invalidate()
-          .rejected(ignore -> result.setError("rejected"))
-          .done(ignore -> rebuildAndSelect(true, selection).notify(result));
+        myStructureTreeModel.invalidate(() -> rebuildAndSelect(true, selection).notify(result));
       }
     });
     return result;
@@ -863,19 +911,13 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
   }
 
   private static boolean getDefaultValue(TreeAction action) {
-    if (action instanceof PropertyOwner) {
-      String propertyName = ((PropertyOwner)action).getPropertyName();
-      return PropertiesComponent.getInstance().getBoolean(TreeStructureUtil.getPropertyName(propertyName));
-    }
-
-    return false;
+    String propertyName = action instanceof PropertyOwner ? ((PropertyOwner)action).getPropertyName() : action.getName();
+    return PropertiesComponent.getInstance().getBoolean(TreeStructureUtil.getPropertyName(propertyName), Sorter.ALPHA_SORTER.equals(action));
   }
 
   private static void saveState(TreeAction action, boolean state) {
-    if (action instanceof PropertyOwner) {
-      String propertyName = ((PropertyOwner)action).getPropertyName();
-      PropertiesComponent.getInstance().setValue(TreeStructureUtil.getPropertyName(propertyName), state);
-    }
+    String propertyName = action instanceof PropertyOwner ? ((PropertyOwner)action).getPropertyName() : action.getName();
+    PropertiesComponent.getInstance().setValue(TreeStructureUtil.getPropertyName(propertyName), state);
   }
 
   public void setTitle(String title) {
@@ -1156,5 +1198,4 @@ public class FileStructurePopup implements Disposable, TreeActionsOwner {
     }
     return parents;
   }
-
 }

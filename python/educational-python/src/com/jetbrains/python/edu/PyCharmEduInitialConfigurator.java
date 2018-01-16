@@ -56,11 +56,9 @@ import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.project.ProjectManagerListener;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.startup.StartupManager;
-import com.intellij.openapi.ui.DialogBuilder;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Ref;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.*;
@@ -153,7 +151,6 @@ public class PyCharmEduInitialConfigurator {
     final UISettings uiSettings = UISettings.getInstance();
 
     if (!propertiesComponent.getBoolean(CONFIGURED_V4)) {
-      Registry.get("dumb.aware.run.configurations").setValue(true);
       propertiesComponent.setValue(CONFIGURED_V4, true);
     }
 
@@ -186,7 +183,6 @@ public class PyCharmEduInitialConfigurator {
       EditorSettingsExternalizable.getInstance().setVirtualSpace(false);
       EditorSettingsExternalizable.getInstance().getOptions().ARE_LINE_NUMBERS_SHOWN = true;
       final CodeStyleSettings settings = CodeStyleSettingsManager.getInstance().getCurrentSettings();
-      settings.ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
       settings.getCommonSettings(PythonLanguage.getInstance()).ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
       uiSettings.setShowDirectoryForNonUniqueFilenames(true);
       uiSettings.setShowMemoryIndicator(false);
@@ -215,7 +211,6 @@ public class PyCharmEduInitialConfigurator {
       @Override
       public void appFrameCreated(String[] commandLineArgs, @NotNull Ref<Boolean> willOpenProject) {
         if (!propertiesComponent.isValueSet(CONFIGURED_V3)) {
-          showInitialConfigurationDialog();
           propertiesComponent.setValue(CONFIGURED_V3, "true");
         }
       }
@@ -386,7 +381,7 @@ public class PyCharmEduInitialConfigurator {
     AnAction action = actionManager.getAction(actionId);
     if (action != null) {
       AnAction actionGroup = actionManager.getAction(groupId);
-      if (actionGroup != null && actionGroup instanceof DefaultActionGroup) {
+      if (actionGroup instanceof DefaultActionGroup) {
         ((DefaultActionGroup)actionGroup).remove(action);
         actionManager.unregisterAction(actionId);
       }
@@ -412,13 +407,5 @@ public class PyCharmEduInitialConfigurator {
         if (droppedActions.contains(id)) keymapImpl.clearOwnActionsId(id);
       }
     }
-  }
-  private static void showInitialConfigurationDialog() {
-    DialogBuilder dialog = new DialogBuilder();
-    final CustomizeEduStepPanel panel = new CustomizeEduStepPanel();
-    dialog.setPreferredFocusComponent(panel.getStudentButton());
-    dialog.title("Are you Student or Teacher?").centerPanel(panel);
-    dialog.addOkAction().setText("Start using Pycharm Edu");
-    dialog.show();
   }
 }

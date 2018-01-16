@@ -30,9 +30,10 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowAnchor;
 import com.intellij.openapi.wm.ToolWindowType;
+import com.intellij.openapi.wm.ex.LayoutFocusTraversalPolicyExt;
 import com.intellij.openapi.wm.impl.commands.FinalizableCommand;
 import com.intellij.reference.SoftReference;
-import com.intellij.ui.ScreenUtil;
+import com.intellij.ui.OnePixelSplitter;
 import com.intellij.ui.components.JBLayeredPane;
 import com.intellij.util.containers.HashMap;
 import com.intellij.util.ui.UIUtil;
@@ -45,6 +46,7 @@ import java.awt.image.BufferedImage;
 import java.lang.ref.Reference;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -144,6 +146,58 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
     add(myBottomStripe, JLayeredPane.POPUP_LAYER);
     add(myRightStripe, JLayeredPane.POPUP_LAYER);
     add(myLayeredPane, JLayeredPane.DEFAULT_LAYER);
+
+    setFocusTraversalPolicy(new LayoutFocusTraversalPolicyExt() {
+      @Override
+      protected Component getDefaultComponentImpl(Container focusCycleRoot) {
+        return super.getDefaultComponentImpl(focusCycleRoot);
+      }
+
+      @Override
+      public Component getFirstComponent(Container focusCycleRoot) {
+        return super.getFirstComponent(focusCycleRoot);
+      }
+
+      @Override
+      protected Component getFirstComponentImpl(Container focusCycleRoot) {
+        return super.getFirstComponentImpl(focusCycleRoot);
+      }
+
+      @Override
+      public Component getLastComponent(Container focusCycleRoot) {
+        return super.getLastComponent(focusCycleRoot);
+      }
+
+      @Override
+      protected Component getLastComponentImpl(Container focusCycleRoot) {
+        return super.getLastComponentImpl(focusCycleRoot);
+      }
+
+      @Override
+      public Component getComponentAfter(Container focusCycleRoot, Component aComponent) {
+        return super.getComponentAfter(focusCycleRoot, aComponent);
+      }
+
+      @Override
+      protected Component getComponentAfterImpl(Container focusCycleRoot, Component aComponent) {
+        return super.getComponentAfterImpl(focusCycleRoot, aComponent);
+      }
+
+      @Override
+      public Component getComponentBefore(Container focusCycleRoot, Component aComponent) {
+        return super.getComponentBefore(focusCycleRoot, aComponent);
+      }
+
+      @Override
+      public Component getInitialComponent(JInternalFrame frame) {
+        return super.getInitialComponent(frame);
+      }
+
+      @Override
+      public Component getInitialComponent(Window window) {
+        return super.getInitialComponent(window);
+      }
+    });
   }
 
   @Override
@@ -328,7 +382,7 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
     return myId2Button.get(id);
   }
 
-  private Component getDecoratorById(final String id) {
+  private InternalDecorator getDecoratorById(final String id) {
     return myId2Decorator.get(id);
   }
 
@@ -788,7 +842,7 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
     public void run() {
       try {
         final ToolWindowAnchor anchor = myInfo.getAnchor();
-        class MySplitter extends Splitter implements UISettingsListener {
+        class MySplitter extends OnePixelSplitter implements UISettingsListener {
           @Override
           public void uiSettingsChanged(UISettings uiSettings) {
             if (anchor == ToolWindowAnchor.LEFT) {
@@ -797,6 +851,11 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
             else if (anchor == ToolWindowAnchor.RIGHT) {
               setOrientation(!uiSettings.getRightHorizontalSplit());
             }
+          }
+
+          @Override
+          public String toString() {
+            return "["+String.valueOf(getFirstComponent()) + "|" + String.valueOf(getSecondComponent())+"]";
           }
         }
         Splitter splitter = new MySplitter();
@@ -822,22 +881,43 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
           });
         }
         JComponent c = getComponentAt(anchor);
+        //If all components are hidden for anchor we should find the second component to put in a splitter
+        //Otherwise we add empty splitter
+        if (c == null) {
+          List<String> ids = ToolWindowsPane.this.myManager.getIdsOn(anchor);
+          ids.remove(myInfo.getId());
+          for (Iterator<String> iterator = ids.iterator(); iterator.hasNext(); ) {
+            String id = iterator.next();
+            ToolWindow window = myManager.getToolWindow(id);
+            if (window == null || window.isSplitMode() == myInfo.isSplit() || !window.isVisible()) iterator.remove();
+          }
+          if (!ids.isEmpty()) {
+            InternalDecorator anotherDecorator = getDecoratorById(ids.get(0));
+            if (anotherDecorator!= null) {
+              c = anotherDecorator;
+            }
+          }
+          if (c == null) {
+            LOG.error("Empty splitter @ " + anchor + " during AddAndSplitDockedComponentCmd for " + myInfo.getId());
+          }
+        }
         float newWeight;
         if (c instanceof InternalDecorator) {
           InternalDecorator oldComponent = (InternalDecorator)c;
+          WindowInfoImpl oldInfo = oldComponent.getWindowInfo();
           if (myInfo.isSplit()) {
             splitter.setFirstComponent(oldComponent);
             splitter.setSecondComponent(myNewComponent);
-            float proportion = getPreferredSplitProportion(oldComponent.getWindowInfo().getId(),
-                                                           normalizeWeigh(oldComponent.getWindowInfo().getSideWeight() /
-                                                                          (oldComponent.getWindowInfo().getSideWeight() +
+            float proportion = getPreferredSplitProportion(oldInfo.getId(),
+                                                           normalizeWeigh(oldInfo.getSideWeight() /
+                                                                          (oldInfo.getSideWeight() +
                                                                            myInfo.getSideWeight())));
             splitter.setProportion(proportion);
             if (!anchor.isHorizontal() && !anchor.isSplitVertically()) {
-              newWeight = normalizeWeigh(oldComponent.getWindowInfo().getWeight() + myInfo.getWeight());
+              newWeight = normalizeWeigh(oldInfo.getWeight() + myInfo.getWeight());
             }
             else {
-              newWeight = normalizeWeigh(oldComponent.getWindowInfo().getWeight());
+              newWeight = normalizeWeigh(oldInfo.getWeight());
             }
           }
           else {
@@ -845,7 +925,7 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
             splitter.setSecondComponent(oldComponent);
             splitter.setProportion(normalizeWeigh(myInfo.getSideWeight()));
             if (!anchor.isHorizontal() && !anchor.isSplitVertically()) {
-              newWeight = normalizeWeigh(oldComponent.getWindowInfo().getWeight() + myInfo.getWeight());
+              newWeight = normalizeWeigh(oldInfo.getWeight() + myInfo.getWeight());
             }
             else {
               newWeight = normalizeWeigh(myInfo.getWeight());
@@ -1039,6 +1119,7 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
           myLayeredPane.validate();
           myLayeredPane.repaint();
         }
+        transferFocus();
       }
       finally {
         finish();

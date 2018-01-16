@@ -21,7 +21,6 @@ import com.intellij.openapi.module.EffectiveLanguageLevelUtil;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.projectRoots.JavaSdkVersion;
-import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.impl.FilePropertyPusher;
 import com.intellij.openapi.roots.impl.JavaLanguageLevelPusher;
 import com.intellij.openapi.util.*;
@@ -2700,11 +2699,14 @@ public class HighlightUtil extends HighlightUtilBase {
     if ((resolved instanceof PsiLocalVariable || resolved instanceof PsiParameter) && !(resolved instanceof ImplicitVariable)) {
       return HighlightControlFlowUtil.checkVariableMustBeFinal((PsiVariable)resolved, ref, languageLevel);
     }
+
     if (resolved instanceof PsiClass &&
         ((PsiClass)resolved).getContainingClass() == null &&
-        PsiTreeUtil.getParentOfType(ref, PsiImportStatementBase.class) != null &&
-        PsiUtil.isFromDefaultPackage((PsiClass)resolved)) {
-      String description = JavaErrorMessages.message("cannot.resolve.symbol", refName.getText());
+        PsiUtil.isFromDefaultPackage(resolved) &&
+        (PsiTreeUtil.getParentOfType(ref, PsiImportStatementBase.class) != null ||
+         PsiUtil.isModuleFile(containingFile) ||
+         !PsiUtil.isFromDefaultPackage(containingFile))) {
+      String description = JavaErrorMessages.message("class.in.default.package", ((PsiClass)resolved).getName());
       return HighlightInfo.newHighlightInfo(HighlightInfoType.WRONG_REF).range(refName).descriptionAndTooltip(description).create();
     }
 
@@ -2746,16 +2748,13 @@ public class HighlightUtil extends HighlightUtilBase {
   @Nullable
   static HighlightInfo checkPackageAndClassConflict(@NotNull PsiJavaCodeReferenceElement ref, @NotNull PsiFile containingFile) {
     if (ref.isQualified() && getOuterReferenceParent(ref).getParent() instanceof PsiPackageStatement) {
-      VirtualFile file = containingFile.getVirtualFile();
-      if (file != null) {
-        Module module = ProjectFileIndex.SERVICE.getInstance(ref.getProject()).getModuleForFile(file);
-        if (module != null) {
-          GlobalSearchScope scope = module.getModuleWithDependenciesAndLibrariesScope(false);
-          PsiClass aClass = JavaPsiFacade.getInstance(ref.getProject()).findClass(ref.getCanonicalText(), scope);
-          if (aClass != null) {
-            String message = JavaErrorMessages.message("package.clashes.with.class", ref.getText());
-            return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(ref).descriptionAndTooltip(message).create();
-          }
+      Module module = ModuleUtilCore.findModuleForFile(containingFile);
+      if (module != null) {
+        GlobalSearchScope scope = module.getModuleWithDependenciesAndLibrariesScope(false);
+        PsiClass aClass = JavaPsiFacade.getInstance(ref.getProject()).findClass(ref.getCanonicalText(), scope);
+        if (aClass != null) {
+          String message = JavaErrorMessages.message("package.clashes.with.class", ref.getText());
+          return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(ref).descriptionAndTooltip(message).create();
         }
       }
     }

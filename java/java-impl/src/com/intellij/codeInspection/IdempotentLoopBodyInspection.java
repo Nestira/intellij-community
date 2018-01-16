@@ -24,7 +24,7 @@ public class IdempotentLoopBodyInspection extends AbstractBaseJavaLocalInspectio
         if (condition == null || SideEffectChecker.mayHaveSideEffects(condition)) return;
         PsiStatement body = loop.getBody();
         if (body == null) return;
-        if (mayHaveUndesiredSideEffects(loop, body)) return;
+        if (mayHaveUndesiredSideEffects(body)) return;
         final ControlFlow controlFlow;
         try {
           controlFlow =
@@ -44,7 +44,7 @@ public class IdempotentLoopBodyInspection extends AbstractBaseJavaLocalInspectio
         PsiStatement body = loop.getBody();
         if (body == null) return;
         PsiStatement update = loop.getUpdate();
-        if (mayHaveUndesiredSideEffects(loop, body) || update != null && mayHaveUndesiredSideEffects(loop, update)) return;
+        if (mayHaveUndesiredSideEffects(body) || update != null && mayHaveUndesiredSideEffects(update)) return;
         ControlFlow controlFlow;
         try {
           controlFlow =
@@ -70,23 +70,29 @@ public class IdempotentLoopBodyInspection extends AbstractBaseJavaLocalInspectio
         }
       }
 
-      private boolean mayHaveUndesiredSideEffects(PsiLoopStatement loop, @NotNull PsiElement element) {
-        return SideEffectChecker.mayHaveSideEffects(element, e -> {
-          if (e instanceof PsiContinueStatement && ((PsiContinueStatement)e).findContinuedStatement() == loop) return true;
-          if (e instanceof PsiLocalVariable) return true;
-          if (e instanceof PsiAssignmentExpression) {
-            PsiAssignmentExpression assignment = (PsiAssignmentExpression)e;
-            if (assignment.getOperationTokenType() == JavaTokenType.EQ) {
-              PsiReferenceExpression ref =
-                tryCast(PsiUtil.skipParenthesizedExprDown(assignment.getLExpression()), PsiReferenceExpression.class);
-              if (ref != null) {
-                PsiElement target = ref.resolve();
-                if (target instanceof PsiLocalVariable || target instanceof PsiParameter) return true;
-              }
+      private boolean mayHaveUndesiredSideEffects(@NotNull PsiElement element) {
+        return SideEffectChecker.mayHaveSideEffects(element, this::isAcceptableSideEffect);
+      }
+
+      private boolean isAcceptableSideEffect(PsiElement e) {
+        if (e instanceof PsiContinueStatement ||
+            e instanceof PsiReturnStatement ||
+            e instanceof PsiThrowStatement) {
+          return true;
+        }
+        if (e instanceof PsiLocalVariable) return true;
+        if (e instanceof PsiAssignmentExpression) {
+          PsiAssignmentExpression assignment = (PsiAssignmentExpression)e;
+          if (assignment.getOperationTokenType() == JavaTokenType.EQ) {
+            PsiReferenceExpression ref =
+              tryCast(PsiUtil.skipParenthesizedExprDown(assignment.getLExpression()), PsiReferenceExpression.class);
+            if (ref != null) {
+              PsiElement target = ref.resolve();
+              if (target instanceof PsiLocalVariable || target instanceof PsiParameter) return true;
             }
           }
-          return false;
-        });
+        }
+        return false;
       }
     };
   }

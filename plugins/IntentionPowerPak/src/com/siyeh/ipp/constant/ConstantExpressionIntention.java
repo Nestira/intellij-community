@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2013 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2018 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,9 @@ package com.siyeh.ipp.constant;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiExpression;
-import com.intellij.util.IncorrectOperationException;
 import com.siyeh.IntentionPowerPackBundle;
 import com.siyeh.ig.PsiReplacementUtil;
+import com.siyeh.ig.psiutils.CommentTracker;
 import com.siyeh.ig.psiutils.ExpressionUtils;
 import com.siyeh.ipp.base.MutablyNamedIntention;
 import com.siyeh.ipp.base.PsiElementPredicate;
@@ -43,7 +43,7 @@ public class ConstantExpressionIntention extends MutablyNamedIntention {
   }
 
   @Override
-  public void processIntention(PsiElement element) throws IncorrectOperationException {
+  public void processIntention(PsiElement element) {
     final PsiExpression expression = (PsiExpression)element;
     final Object value = ExpressionUtils.computeConstantExpression(expression);
     @NonNls final String newExpression;
@@ -97,6 +97,6 @@ public class ConstantExpressionIntention extends MutablyNamedIntention {
     else {
       newExpression = String.valueOf(value);
     }
-    PsiReplacementUtil.replaceExpression(expression, newExpression);
+    PsiReplacementUtil.replaceExpression(expression, newExpression, new CommentTracker());
   }
 }

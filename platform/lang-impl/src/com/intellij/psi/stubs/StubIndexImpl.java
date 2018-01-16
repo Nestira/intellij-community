@@ -89,10 +89,6 @@ public class StubIndexImpl extends StubIndex implements PersistentStateComponent
   }
 
   private AsyncState getAsyncState() {
-    //if (!myInitialized) { // memory barrier
-    //  //throw new IndexNotReadyException();
-    //  LOG.error("Unexpected initialization problem");
-    //}
     AsyncState state = myState; // memory barrier
     if (state == null) {
       try {
@@ -414,6 +410,7 @@ public class StubIndexImpl extends StubIndex implements PersistentStateComponent
     myAccessValidator.checkAccessingIndexDuringOtherIndexProcessing(StubUpdatingIndex.INDEX_ID);
     try {
       myAccessValidator.startedProcessingActivityForIndex(StubUpdatingIndex.INDEX_ID);
+      FileBasedIndexImpl.disableUpToDateCheckForCurrentThread();
       return index.processAllKeys(processor, scope, idFilter);
     }
     catch (StorageException e) {
@@ -426,6 +423,7 @@ public class StubIndexImpl extends StubIndex implements PersistentStateComponent
       }
       throw e;
     } finally {
+      FileBasedIndexImpl.enableUpToDateCheckForCurrentThread();
       myAccessValidator.stoppedProcessingActivityForIndex(StubUpdatingIndex.INDEX_ID);
     }
     return true;
@@ -467,8 +465,8 @@ public class StubIndexImpl extends StubIndex implements PersistentStateComponent
   @Override
   public void initComponent() {
     long started = System.nanoTime();
-    StubIndexExtension<?, ?>[] extensions = Extensions.getExtensions(StubIndexExtension.EP_NAME);
-    LOG.info("All stub exts enumerated:" + (System.nanoTime() - started) / 1000000);
+    StubIndexExtension<?, ?>[] extensions = IndexInfrastructure.hasIndices() ? initExtensions() : new StubIndexExtension[0];
+    LOG.info("All stub exts enumerated:" + (System.nanoTime() - started) / 1000000 + ", number of extensions:" + extensions.length);
     started = System.nanoTime();
 
     myStateFuture = IndexInfrastructure.submitGenesisTask(new StubIndexInitialization(extensions));
@@ -483,12 +481,13 @@ public class StubIndexImpl extends StubIndex implements PersistentStateComponent
     }
   }
 
-  //@Override
-  //public void dispose() {
-    // This index must be disposed only after StubUpdatingIndex is disposed
-    // To ensure this, disposing is done explicitly from StubUpdatingIndex by calling dispose() method
-    // do not call this method here to avoid double-disposal
-  //}
+  @NotNull
+  public static StubIndexExtension<?, ?>[] initExtensions() {
+    StubIndexExtension[] extensions = Extensions.getExtensions(StubIndexExtension.EP_NAME);
+    // initialize stub index keys
+    for(StubIndexExtension extension:extensions) extension.getKey();
+    return extensions;
+  }
 
   public void dispose() {
     for (UpdatableIndex index : getAsyncState().myIndices.values()) {
@@ -533,7 +532,7 @@ public class StubIndexImpl extends StubIndex implements PersistentStateComponent
   }
 
   private boolean dropUnregisteredIndices(AsyncState state) {
-    if (ApplicationManager.getApplication().isDisposed()) {
+    if (ApplicationManager.getApplication().isDisposed() || !IndexInfrastructure.hasIndices()) {
       return false;
     }
 
@@ -590,7 +589,7 @@ public class StubIndexImpl extends StubIndex implements PersistentStateComponent
     }
 
     public MyIndex(IndexExtension<K, StubIdList, Void> extension, IndexStorage<K, StubIdList> storage) throws IOException {
-      super(extension, storage);
+      super(extension, storage, null);
     }
 
     @Override

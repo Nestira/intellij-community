@@ -314,6 +314,34 @@ public class ContainerUtilRt {
     public Iterator<T> iterator() {
       return EmptyIterator.getInstance();
     }
+
+    @NotNull
+    @Override
+    public ListIterator<T> listIterator() {
+      return EmptyListIterator.getInstance();
+    }
+
+    @Override
+    public boolean containsAll(@NotNull Collection<?> c) {
+      return c.isEmpty();
+    }
+
+    @Override
+    @Contract(pure = true)
+    public boolean isEmpty() {
+      return true;
+    }
+
+    @Override
+    @Contract(pure = true)
+    public boolean equals(Object o) {
+      return o instanceof List && ((List)o).isEmpty();
+    }
+
+    @Override
+    public int hashCode() {
+      return 1;
+    }
   }
 
   @NotNull
@@ -419,7 +447,7 @@ public class ContainerUtilRt {
   }
 
   /**
-   * This is a replacement for {@link Collection#toArray(Object[])}. For small collections it is faster to stay at java level and refrain
+   * This is a replacement for {@link Collection#toArray(T[])}. For small collections it is faster to stay at java level and refrain
    * from calling JNI {@link System#arraycopy(Object, int, Object, int, int)}
    */
   @NotNull

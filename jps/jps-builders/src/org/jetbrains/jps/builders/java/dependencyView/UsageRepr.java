@@ -30,7 +30,6 @@ import java.util.*;
 
 /**
  * @author: db
- * Date: 14.02.11
  */
 class UsageRepr {
   private static final byte FIELD_USAGE = 0x0;
@@ -546,38 +545,32 @@ class UsageRepr {
     final TIntHashSet myUsedArguments;
     final Set<ElemType> myUsedTargets;
 
-    public boolean satisfies(final Usage usage) {
-      if (usage instanceof AnnotationUsage) {
-        final AnnotationUsage annotationUsage = (AnnotationUsage)usage;
-
-        if (!myType.equals(annotationUsage.myType)) {
-          return false;
-        }
-
-        boolean argumentsSatisfy = false;
-
-        if (myUsedArguments != null) {
-          final TIntHashSet arguments = new TIntHashSet(myUsedArguments.toArray());
-
-          arguments.removeAll(annotationUsage.myUsedArguments.toArray());
-
-          argumentsSatisfy = !arguments.isEmpty();
-        }
-
-        boolean targetsSatisfy = false;
-
-        if (myUsedTargets != null) {
-          final Collection<ElemType> targets = EnumSet.copyOf(myUsedTargets);
-
-          targets.retainAll(annotationUsage.myUsedTargets);
-
-          targetsSatisfy = !targets.isEmpty();
-        }
-
-        return argumentsSatisfy || targetsSatisfy;
+    public boolean satisfies(final AnnotationUsage annotationUsage) {
+      if (!myType.equals(annotationUsage.myType)) {
+        return false;
       }
 
-      return false;
+      boolean argumentsSatisfy = false;
+
+      if (myUsedArguments != null) {
+        final TIntHashSet arguments = new TIntHashSet(myUsedArguments.toArray());
+
+        arguments.removeAll(annotationUsage.myUsedArguments.toArray());
+
+        argumentsSatisfy = !arguments.isEmpty();
+      }
+
+      boolean targetsSatisfy = false;
+
+      if (myUsedTargets != null) {
+        final Collection<ElemType> targets = EnumSet.copyOf(myUsedTargets);
+
+        targets.retainAll(annotationUsage.myUsedTargets);
+
+        targetsSatisfy = !targets.isEmpty();
+      }
+
+      return argumentsSatisfy || targetsSatisfy;
     }
 
     private AnnotationUsage(final TypeRepr.ClassType type, final TIntHashSet usedArguments, final Set<ElemType> targets) {

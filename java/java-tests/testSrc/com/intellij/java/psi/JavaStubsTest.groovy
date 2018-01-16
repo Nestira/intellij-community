@@ -287,4 +287,36 @@ interface I<T> {}
     assert !file.contentsLoaded
   }
 
+  void "test broken anonymous"() {
+    String text = """
+class A {
+  public GroupDescriptor[] getGroupDescriptors() {
+    return new ThreadGroup(Descriptor[]{
+      new GroupDescriptor(groupId, "test")
+    };
+  }
+}"""
+    PsiFile psiFile = myFixture.addFileToProject("a.java", text)
+    WriteCommandAction.runWriteCommandAction(project) {
+      psiFile.viewProvider.document.insertString(text.indexOf(']{'), 'x')
+    }
+    PsiDocumentManager.getInstance(getProject()).commitAllDocuments()
+    PsiTestUtil.checkStubsMatchText(psiFile)
+  }
+
+  void "test broken nested anonymous"() {
+    PsiTestUtil.checkStubsMatchText(myFixture.addFileToProject("a.java", "class A { { new A(new B[a]{b}); } }"))
+  }
+
+  void "test lone angle brackets"() {
+    String text = """
+class A {
+  {
+    PsiLanguageInjectionHost host = PsiTreeUtil.getParentOfType(element, .class);
+    final <PsiElement, TextRange> pair;
+  }  
+}"""
+    PsiTestUtil.checkStubsMatchText(myFixture.addFileToProject("a.java", text))
+  }
+
 }

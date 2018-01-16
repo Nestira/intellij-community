@@ -18,9 +18,7 @@ package git4idea.history;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -73,7 +71,7 @@ public class GitLogUtil {
       return Collections.emptyList();
     }
 
-    GitSimpleHandler h = new GitSimpleHandler(project, root, GitCommand.LOG);
+    GitLineHandler h = createGitHandler(project, root);
     GitLogParser parser = new GitLogParser(project, GitLogParser.NameStatus.NONE, HASH, PARENTS, AUTHOR_NAME,
                                            AUTHOR_EMAIL, COMMIT_TIME, SUBJECT, COMMITTER_NAME, COMMITTER_EMAIL, AUTHOR_TIME);
     h.setSilent(true);
@@ -83,7 +81,7 @@ public class GitLogUtil {
     h.addParameters(new ArrayList<>(hashes));
     h.endOptions();
 
-    String output = h.run();
+    String output = Git.getInstance().runCommand(h).getOutputOrThrow();
     List<GitLogRecord> records = parser.parse(output);
 
     return ContainerUtil.map(records, record -> {
@@ -110,7 +108,7 @@ public class GitLogUtil {
       return;
     }
 
-    GitLineHandler handler = new GitLineHandler(project, root, GitCommand.LOG);
+    GitLineHandler handler = createGitHandler(project, root);
     GitLogParser parser = new GitLogParser(project, GitLogParser.NameStatus.NONE, HASH, PARENTS, COMMIT_TIME,
                                            AUTHOR_NAME, AUTHOR_EMAIL, REF_NAMES);
     handler.setStdoutSuppressed(true);
@@ -119,24 +117,18 @@ public class GitLogUtil {
     handler.addParameters(parameters);
     handler.endOptions();
 
-    GitLogOutputSplitter handlerListener = new GitLogOutputSplitter(handler, output -> {
-      List<GitLogRecord> records = parser.parse(output);
-      for (GitLogRecord record : records) {
-        if (record == null) continue;
-        record.setUsedHandler(handler);
+    GitLogOutputSplitter handlerListener = new GitLogOutputSplitter(handler, parser, record -> {
+      Hash hash = HashImpl.build(record.getHash());
+      List<Hash> parents = getParentHashes(factory, record);
+      commitConsumer.consume(factory.createTimedCommit(hash, parents, record.getCommitTime()));
 
-        Hash hash = HashImpl.build(record.getHash());
-        List<Hash> parents = getParentHashes(factory, record);
-        commitConsumer.consume(factory.createTimedCommit(hash, parents, record.getCommitTime()));
-
-        for (VcsRef ref : parseRefs(record.getRefs(), hash, factory, root)) {
-          refConsumer.consume(ref);
-        }
-
-        userConsumer.consume(factory.createUser(record.getAuthorName(), record.getAuthorEmail()));
+      for (VcsRef ref : parseRefs(record.getRefs(), hash, factory, root)) {
+        refConsumer.consume(ref);
       }
+
+      userConsumer.consume(factory.createUser(record.getAuthorName(), record.getAuthorEmail()));
     });
-    handler.runInCurrentThread(null);
+    Git.getInstance().runCommandWithoutCollectingOutput(handler);
     handlerListener.reportErrors();
   }
 
@@ -287,7 +279,7 @@ public class GitLogUtil {
                                   @NotNull DiffRenameLimit renameLimit,
                                   @NotNull Consumer<GitLogRecord> converter,
                                   String... parameters) throws VcsException {
-    GitLineHandler handler = new GitLineHandler(project, root, GitCommand.LOG, createConfigParameters(withChanges, renameLimit));
+    GitLineHandler handler = createGitHandler(project, root, createConfigParameters(withChanges, renameLimit));
     readRecordsFromHandler(project, root, withRefs, withChanges, converter, handler, parameters);
   }
 
@@ -303,32 +295,10 @@ public class GitLogUtil {
 
     StopWatch sw = StopWatch.start("loading details in [" + root.getName() + "]");
 
-    Ref<Throwable> parseError = new Ref<>();
-    GitLogOutputSplitter handlerListener = new GitLogOutputSplitter(handler, output -> {
-      try {
-        GitLogRecord record = parser.parseOneRecord(output);
-        if (record != null) {
-          record.setUsedHandler(handler);
-          converter.consume(record);
-        }
-      }
-      catch (ProcessCanceledException pce) {
-        throw pce;
-      }
-      catch (Throwable t) {
-        if (parseError.isNull()) {
-          parseError.set(t);
-          LOG.error("Could not parse \" " + GitLogParser.getTruncatedEscapedOutput(output) + "\"\n" +
-                    "Command " + handler.printableCommandLine(), t);
-        }
-      }
-    });
-    handler.runInCurrentThread(null);
+    GitLogOutputSplitter handlerListener = new GitLogOutputSplitter(handler, parser, converter);
+    Git.getInstance().runCommandWithoutCollectingOutput(handler);
     handlerListener.reportErrors();
 
-    if (!parseError.isNull()) {
-      throw new VcsException(parseError.get());
-    }
     sw.report();
   }
 
@@ -379,7 +349,7 @@ public class GitLogUtil {
         commitConsumer.consume(createCommit(project, root, records, factory, renameLimit));
       }
     };
-    GitLineHandler handler = new GitLineHandler(project, root, GitCommand.LOG, createConfigParameters(true, renameLimit));
+    GitLineHandler handler = createGitHandler(project, root, createConfigParameters(true, renameLimit));
     sendHashesToStdin(vcs, hashes, handler);
 
     readRecordsFromHandler(project, root, false, true, recordCollector, handler, getNoWalkParameter(vcs), STDIN);
@@ -393,14 +363,16 @@ public class GitLogUtil {
   public static void sendHashesToStdin(@NotNull GitVcs vcs, @NotNull Collection<String> hashes, @NotNull GitHandler handler) {
     String separator = getSeparator(vcs);
     handler.setInputProcessor(stream -> {
-      try (OutputStreamWriter writer = new OutputStreamWriter(stream, handler.getCharset())) {
-        for (String hash : hashes) {
-          writer.write(hash);
-          writer.write(separator);
-        }
+      @SuppressWarnings("IOResourceOpenedButNotSafelyClosed")
+      OutputStreamWriter writer = new OutputStreamWriter(stream, handler.getCharset());
+      // if we close this stream, RunnerMediator won't be able to send ctrl+c to the process in order to softly kill it
+      // see RunnerMediator.sendCtrlEventThroughStream
+      for (String hash : hashes) {
+        writer.write(hash);
         writer.write(separator);
-        writer.flush();
       }
+      writer.write(separator);
+      writer.flush();
     });
   }
 
@@ -415,6 +387,16 @@ public class GitLogUtil {
   @NotNull
   public static String getNoWalkParameter(@NotNull GitVcs vcs) {
     return GitVersionSpecialty.NO_WALK_UNSORTED.existsIn(vcs.getVersion()) ? "--no-walk=unsorted" : "--no-walk";
+  }
+
+  @NotNull
+  private static GitLineHandler createGitHandler(@NotNull Project project, @NotNull VirtualFile root) {
+    return createGitHandler(project, root, Collections.emptyList());
+  }
+
+  @NotNull
+  private static GitLineHandler createGitHandler(@NotNull Project project, @NotNull VirtualFile root, @NotNull List<String> configParameters) {
+    return new GitLineHandler(project, root, GitCommand.LOG, configParameters, false);
   }
 
   @NotNull

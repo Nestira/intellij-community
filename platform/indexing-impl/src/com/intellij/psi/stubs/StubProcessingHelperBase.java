@@ -39,14 +39,14 @@ import java.util.List;
 public abstract class StubProcessingHelperBase {
   private static final Logger LOG = Logger.getInstance("#com.intellij.psi.stubs.StubProcessingHelperBase");
 
-  <Psi extends PsiElement> boolean processStubsInFile(@NotNull Project project,
+  public <Psi extends PsiElement> boolean processStubsInFile(@NotNull Project project,
                                                       @NotNull VirtualFile file,
                                                       @NotNull StubIdList value,
                                                       @NotNull Processor<? super Psi> processor,
                                                       @NotNull Class<Psi> requiredClass) {
     PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
     if (psiFile == null) {
-      LOG.error("Stub index points to a file without PSI: " + file.getCanonicalPath() + " (" + file.getFileType() + ")");
+      LOG.error("Stub index points to a file without PSI: " + file.getFileType());
       onInternalError(file);
       return true;
     }
